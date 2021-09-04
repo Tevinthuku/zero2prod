@@ -1,14 +1,24 @@
+use crate::domain::SubscriberEmail;
+use crate::domain::{NewSubscriber, SubscriberName};
 use actix_web::{web, HttpResponse};
 use chrono::Utc;
 use sqlx::PgPool;
+use std::convert::TryInto;
 use unicode_segmentation::UnicodeSegmentation;
 use uuid::Uuid;
-
-use crate::domain::{NewSubscriber, SubscriberName};
 #[derive(serde::Deserialize)]
 pub struct FormData {
     email: String,
     name: String,
+}
+
+impl TryInto<NewSubscriber> for FormData {
+    type Error = String;
+    fn try_into(self) -> Result<NewSubscriber, Self::Error> {
+        let name = SubscriberName::parse(self.name)?;
+        let email = SubscriberEmail::parse(self.email)?;
+        Ok(NewSubscriber { email, name })
+    }
 }
 
 #[tracing::instrument(
@@ -21,14 +31,9 @@ pub async fn subscribe(form: web::Form<FormData>, pool: web::Data<PgPool>) -> Ht
     if !is_valid_name(&form.name) {
         return HttpResponse::BadRequest().finish();
     }
-    let name = match SubscriberName::parse(form.0.name) {
-        Ok(name) => name,
-        // Return early if the name is invalid, with a 400
+    let new_subscriber = match form.0.try_into() {
+        Ok(form) => form,
         Err(_) => return HttpResponse::BadRequest().finish(),
-    };
-    let new_subscriber = NewSubscriber {
-        email: form.0.email,
-        name,
     };
     match insert_subscriber(&pool, &new_subscriber).await {
         Ok(_) => HttpResponse::Ok().finish(),
@@ -50,7 +55,7 @@ pub async fn insert_subscriber(
     VALUES ($1, $2, $3, $4)
 "#,
         Uuid::new_v4(),
-        new_subscriber.email,
+        new_subscriber.email.as_ref(),
         new_subscriber.name.as_ref(),
         Utc::now()
     )
