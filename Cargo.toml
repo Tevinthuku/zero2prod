@@ -17,6 +17,7 @@ name = "zero2prod"
 [dependencies]
 actix-web = "=4.0.0-beta.8"
 actix-http = "=3.0.0-beta.8"
+rand = { version = "0.8", features=["std_rng"] }
 serde = { version = "1", features = ["derive"]}
 config = "0.11.0"
 chrono = "0.4.15"
