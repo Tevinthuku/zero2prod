@@ -25,8 +25,8 @@ fn error_chain_fmt(
 
 #[derive(thiserror::Error)]
 pub enum SubscriptionConfirmError {
-    #[error("Unauthorized access")]
-    UnAuthorizedError,
+    #[error("There is no subscriber associated with the provided token.")]
+    UnknownToken,
     #[error(transparent)]
     UnexpectedError(#[from] anyhow::Error),
 }
@@ -42,13 +42,13 @@ pub async fn confirm(
     parameters: web::Query<Parameters>,
     pool: web::Data<PgPool>,
 ) -> Result<HttpResponse, SubscriptionConfirmError> {
-    let id = get_subscriber_id_from_token(&pool, &parameters.subscription_token)
+    let subscriber_id = get_subscriber_id_from_token(&pool, &parameters.subscription_token)
         .await
-        .context("failed to get the subscriber id from the database")?;
-    let subscriber_id = id.ok_or_else(|| SubscriptionConfirmError::UnAuthorizedError)?;
+        .context("Failed to retrieve the subscriber id associated with the provided token.")?
+        .ok_or(SubscriptionConfirmError::UnknownToken)?;
     confirm_subscriber(&pool, subscriber_id)
         .await
-        .context("failed to confirm the subscriber in the database")?;
+        .context("failed to confirm the subscriber status to `confirmed`")?;
 
     Ok(HttpResponse::Ok().finish())
 }
@@ -60,8 +60,7 @@ pub async fn confirm_subscriber(pool: &PgPool, subscriber_id: Uuid) -> Result<()
         subscriber_id,
     )
     .execute(pool)
-    .await
-    .map_err(|e| e)?;
+    .await?;
     Ok(())
 }
 
@@ -75,15 +74,14 @@ pub async fn get_subscriber_id_from_token(
         subscription_token,
     )
     .fetch_optional(pool)
-    .await
-    .map_err(|e| e)?;
+    .await?;
     Ok(result.map(|r| r.subscriber_id))
 }
 
 impl ResponseError for SubscriptionConfirmError {
     fn status_code(&self) -> StatusCode {
         match self {
-            SubscriptionConfirmError::UnAuthorizedError => StatusCode::UNAUTHORIZED,
+            SubscriptionConfirmError::UnknownToken => StatusCode::UNAUTHORIZED,
             SubscriptionConfirmError::UnexpectedError(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
