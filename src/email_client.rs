@@ -117,7 +117,7 @@ mod tests {
             .await;
         // Act
         let outcome = email_client
-            .send_email(email(), &subject(), &content(), &content())
+            .send_email(&email(), &subject(), &content(), &content())
             .await;
         // Assert
         assert_err!(outcome);
@@ -140,7 +140,7 @@ mod tests {
 
         // Act
         let _ = email_client
-            .send_email(email(), &subject(), &content(), &content())
+            .send_email(&email(), &subject(), &content(), &content())
             .await;
 
         // Assert
