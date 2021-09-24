@@ -16,6 +16,7 @@ name = "zero2prod"
 
 [dependencies]
 anyhow = "1"
+base64 = "0.13"
 actix-web = "=4.0.0-beta.8"
 actix-http = "=3.0.0-beta.8"
 rand = { version = "0.8", features=["std_rng"] }
