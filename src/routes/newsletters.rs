@@ -7,6 +7,7 @@ use actix_web::web;
 use actix_web::HttpResponse;
 use actix_web::ResponseError;
 use anyhow::Context;
+use argon2::{Argon2, PasswordHash, PasswordVerifier};
 use sqlx::PgPool;
 #[derive(serde::Deserialize)]
 pub struct BodyData {
@@ -62,7 +63,9 @@ pub async fn publish_newsletter(
     email_client: web::Data<EmailClient>,
     request: web::HttpRequest,
 ) -> Result<HttpResponse, PublishError> {
-    let _credentials = basic_authentication(request.headers()).map_err(PublishError::AuthError)?;
+    let credentials = basic_authentication(request.headers()).map_err(PublishError::AuthError)?;
+    tracing::Span::current().record("username", &tracing::field::display(&credentials.username));
+    let user_id = validate_credentials(credentials, &pool).await?;
     let subscribers = get_confirmed_subscribers(&pool).await?;
     for subscriber in subscribers {
         // The compiler forces us to handle both the happy and unhappy case!
@@ -125,6 +128,41 @@ fn basic_authentication(headers: &HeaderMap) -> Result<Credentials, anyhow::Erro
     Ok(Credentials { username, password })
 }
 
+async fn validate_credentials(
+    credentials: Credentials,
+    pool: &PgPool,
+) -> Result<uuid::Uuid, PublishError> {
+    let row: Option<_> = sqlx::query!(
+        r#"
+        SELECT user_id, password_hash
+        FROM users
+        WHERE username = $1
+        "#,
+        credentials.username,
+    )
+    .fetch_optional(pool)
+    .await
+    .context("Failed to perform a query to validate auth credentials.")
+    .map_err(PublishError::UnexpectedError)?;
+
+    let (expected_password_hash, user_id) = match row {
+        Some(row) => (row.password_hash, row.user_id),
+        None => {
+            return Err(PublishError::AuthError(anyhow::anyhow!(
+                "Unknown username."
+            )))
+        }
+    };
+
+    let expected_password_hash = PasswordHash::new(&expected_password_hash)
+        .context("Failed to parse hash in PHC string format.")
+        .map_err(PublishError::UnexpectedError)?;
+    Argon2::default()
+        .verify_password(credentials.password.as_bytes(), &expected_password_hash)
+        .context("Invalid password.")
+        .map_err(PublishError::AuthError)?;
+    Ok(user_id)
+}
 struct ConfirmedSubscriber {
     email: SubscriberEmail,
 }
